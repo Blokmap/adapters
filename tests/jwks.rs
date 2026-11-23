@@ -129,6 +129,7 @@ async fn jwks_is_lazy_shared_and_refreshed_after_ten_minutes() {
 		iat:    now,
 		jti:    Uuid::nil(),
 		scopes: vec!["core:user".parse().unwrap()],
+		roles: vec![]
 	};
 	let private =
 		EncodingKey::from_ed_pem(include_bytes!("keys/ed25519-private.pem"))

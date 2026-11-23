@@ -38,9 +38,12 @@ pub enum Error {
 		#[serde(skip_serializing)]
 		jsonwebtoken::errors::Error,
 	),
-	/// The configured request cookie is absent.
+	/// Neither an Authorization header nor the configured cookie is present.
 	#[error("missing access token")]
 	MissingAccessToken,
+	/// The request's Authorization header is not one valid Bearer credential.
+	#[error("expected a single Authorization: Bearer <token> header")]
+	MalformedAuthorizationHeader,
 	#[cfg(feature = "jwks")]
 	/// Remote verification cannot select a key without a JWT `kid` header.
 	#[error("JWT header is missing kid")]
@@ -123,7 +126,9 @@ impl Error {
 			Self::MissingJwtKeyId
 			| Self::JwkNotFound(_)
 			| Self::InvalidJwk(_) => StatusCode::UNAUTHORIZED,
-			Self::MissingAccessToken => StatusCode::UNAUTHORIZED,
+			Self::MissingAccessToken | Self::MalformedAuthorizationHeader => {
+				StatusCode::UNAUTHORIZED
+			},
 			Self::UnexpectedPrincipal | Self::MissingScope(_) => {
 				StatusCode::FORBIDDEN
 			},

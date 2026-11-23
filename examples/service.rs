@@ -12,11 +12,12 @@ use blokmap_auth::authorization::{
 };
 use blokmap_auth::client::HttpClient;
 use blokmap_auth::config::BlokmapAdapterConfig;
+use blokmap_auth::extractor::scope::ImagesUpload;
 use blokmap_auth::extractor::{
 	DeviceSession,
 	JwtSession,
 	ProfileSession,
-	require_scope,
+	Scope,
 };
 use uuid::Uuid;
 
@@ -38,10 +39,7 @@ fn main() -> Result<()> {
 		.route("/profile", get(profile))
 		.route("/device", get(device))
 		.route("/locations/{id}", get(location))
-		.route(
-			"/upload",
-			post(upload).route_layer(require_scope("images:upload")),
-		);
+		.route("/upload", post(upload));
 
 	Ok(())
 }
@@ -54,7 +52,10 @@ async fn profile(session: ProfileSession) -> Json<ProfileSession> {
 
 async fn device(session: DeviceSession) -> Json<DeviceSession> { Json(session) }
 
-async fn upload(session: ProfileSession) -> Json<ProfileSession> {
+async fn upload(
+	_: Scope<ImagesUpload>,
+	session: ProfileSession,
+) -> Json<ProfileSession> {
 	Json(session)
 }
 

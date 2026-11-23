@@ -1,8 +1,9 @@
 use axum::extract::FromRequestParts;
 use axum::http::Request;
 use blokmap_auth::Error;
-use blokmap_auth::authentication::{EncodingKey, JwtSession, JwtToken};
+use blokmap_auth::authentication::{EncodingKey, JwtToken};
 use blokmap_auth::config::BlokmapAdapterConfig;
+use blokmap_auth::extractor::JwtSession;
 
 #[tokio::test]
 async fn initialization_is_atomic_and_local_verification_bypasses_jwks() {
@@ -38,6 +39,7 @@ async fn initialization_is_atomic_and_local_verification_bypasses_jwks() {
 		iat:    now,
 		jti:    uuid::Uuid::nil(),
 		scopes: vec![],
+		roles: vec![]
 	};
 	let key =
 		EncodingKey::from_ed_pem(include_bytes!("keys/ed25519-private.pem"))

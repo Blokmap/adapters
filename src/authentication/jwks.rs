@@ -42,7 +42,8 @@ struct CachedJwks {
 /// and expired key snapshots are not used for verification.
 ///
 /// ```no_run
-/// use blokmap_auth::authentication::{JwksManager, JwtSession};
+/// use blokmap_auth::authentication::JwksManager;
+/// use blokmap_auth::extractor::JwtSession;
 /// # async fn read(token: &str) -> blokmap_auth::Result<JwtSession> {
 /// let claims = JwksManager::global()?.verify(token).await?;
 /// JwtSession::try_from(claims)

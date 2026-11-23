@@ -30,13 +30,26 @@ pub enum TokenScope {
 	/// Requests or grants `auth:profiles:update`.
 	#[serde(rename = "auth:profiles:update")]
 	AuthProfilesUpdate,
-	/// Requests or grants `blokmap:admin`.
-	#[serde(rename = "blokmap:admin")]
-	BlokmapAdmin,
 	/// Scopes belonging to other services are preserved verbatim.
 	#[serde(untagged)]
 	Other(String),
 }
+
+serde_plain::derive_display_from_serialize!(TokenScope);
+serde_plain::derive_fromstr_from_deserialize!(TokenScope);
+
+
+
+impl From<String> for TokenScope {
+	fn from(value: String) -> Self {
+		serde_plain::from_str(&value).unwrap_or(Self::Other(value))
+	}
+}
+
+impl From<&str> for TokenScope {
+	fn from(value: &str) -> Self { Self::from(value.to_owned()) }
+}
+
 
 /// Resource kind used in an authorization requirement.
 ///
@@ -49,17 +62,4 @@ pub enum PermissionScope {
 	Location,
 	/// An institution; pair with [`super::InstitutionPermissions`].
 	Institution,
-}
-
-serde_plain::derive_display_from_serialize!(TokenScope);
-serde_plain::derive_fromstr_from_deserialize!(TokenScope);
-
-impl From<String> for TokenScope {
-	fn from(value: String) -> Self {
-		serde_plain::from_str(&value).unwrap_or(Self::Other(value))
-	}
-}
-
-impl From<&str> for TokenScope {
-	fn from(value: &str) -> Self { Self::from(value.to_owned()) }
 }

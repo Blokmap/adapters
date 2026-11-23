@@ -73,27 +73,40 @@
 //! ```no_run
 //! use axum::routing::post;
 //! use axum::{Json, Router};
-//! use blokmap_auth::extractor::{ProfileSession, require_scope};
+//! use blokmap_auth::extractor::scope::ImagesUpload;
+//! use blokmap_auth::extractor::{ProfileSession, Scope};
 //!
-//! async fn upload(session: ProfileSession) -> Json<ProfileSession> {
+//! async fn upload(
+//! 	_: Scope<ImagesUpload>,
+//! 	session: ProfileSession,
+//! ) -> Json<ProfileSession> {
 //! 	Json(session)
 //! }
-//! let app: Router = Router::new().route(
-//! 	"/images",
-//! 	post(upload).route_layer(require_scope("images:upload")),
-//! );
+//! let app: Router = Router::new().route("/images", post(upload));
 //! ```
 //!
-//! .cookie_name read the configured cookie and verify the signature, issuer,
-//! audience, and expiration using the local key or remote JWKS. Verification
-//! is reused within each request, including scope guards. The default cookie
-//! is `blokmap_auth`. Expiration permits 60 seconds of clock skew; `nbf` is
-//! ignored, following the JWT library's defaults.
+//! Session extractors accept `Authorization: Bearer <token>` for service,
+//! device, and profile principals. With no Authorization header, they read the
+//! configured cookie (default `blokmap_auth`), supporting browser sessions.
+//! A present Authorization header takes precedence; malformed, duplicate, or
+//! invalid headers return 401 without falling back to the cookie. Mobile apps
+//! can use Bearer headers with the same extractors as browser clients.
+//!
+//! Both sources verify the signature, issuer, audience, and expiration using
+//! the local key or remote JWKS. Verification is reused within each request,
+//! including scope extractors. Expiration permits 60 seconds of clock skew;
+//! `nbf` is ignored, following the JWT library's defaults.
 //!
 //! Missing or invalid credentials return 401; a wrong principal or missing
-//! scope returns 403. Scope guards accept `TokenScope` values or custom strings
-//! and preserve request bodies. Handlers can return the root `Result<T>` for
-//! structured JSON errors.
+//! scope returns 403. `Scope<ImagesUpload>` and other built-in markers require
+//! exact scopes; implement `extractor::scope::RequiredScope` for custom scopes.
+//! Scope extractors preserve request bodies. Handlers can return the root
+//! `Result<T>` for structured JSON errors.
+//!
+//! `session.is_admin()` checks for `TokenScope::SystemAdmin` (`system:admin`).
+//! `session.is_profile(id)` checks both the profile principal and subject UUID.
+//! Use `session.is_admin() || session.is_profile(id)` for routes allowing
+//! system administrators or operations on one's own profile.
 //!
 //! See `examples/service.rs` for a remote consumer and `examples/server.rs`
 //! for local signing, verification, and extractor setup.

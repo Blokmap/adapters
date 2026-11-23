@@ -31,6 +31,7 @@ fn claims() -> JwtToken {
 			"core:admin".parse().unwrap(),
 			"auth:check".parse().unwrap(),
 		],
+		roles: vec![]
 	}
 }
 

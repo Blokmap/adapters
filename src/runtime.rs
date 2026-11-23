@@ -2,7 +2,6 @@ use std::sync::OnceLock;
 
 #[cfg(feature = "jwks")]
 use crate::authentication::JwksManager;
-use crate::authentication::JwtToken;
 #[cfg(feature = "authorization")]
 use crate::authorization::AuthorizationService;
 use crate::config::BlokmapAdapterConfig;
@@ -21,26 +20,6 @@ pub(crate) struct Runtime {
 impl Runtime {
 	pub(crate) fn global() -> Result<&'static Self> {
 		RUNTIME.get().ok_or(Error::AdapterNotInitialized)
-	}
-
-	pub(crate) async fn verify(&self, token: &str) -> Result<JwtToken> {
-		if let Some(key) = &self.config.verification_key {
-			return JwtToken::verify(
-				token,
-				key,
-				&self.config.jwt_issuer,
-				&self.config.jwt_audience,
-			);
-		}
-
-		#[cfg(feature = "jwks")]
-		if let Some(jwks) = &self.jwks {
-			return jwks.verify(token).await;
-		}
-
-		Err(Error::InvalidConfiguration(
-			"JWT verification is not configured".into(),
-		))
 	}
 }
 

@@ -12,14 +12,13 @@ jwks = ["dep:arc-swap", "dep:reqwest", "dep:tokio"]
 [dependencies]
 arc-swap = { version = "1.9.5", optional = true }
 axum = { version = "0.8.9", default-features = false, features = ["json"] }
-axum-extra = { version = "0.12.6", default-features = false, features = ["cookie"] }
+axum-extra = { version = "0.12.6", default-features = false, features = ["cookie", "typed-header"] }
 bitflags = "2.13.2"
 jsonwebtoken = { version = "12.0.0", default-features = false, features = ["rust_crypto", "use_pem"] }
 reqwest = { version = "0.13.5", optional = true, features = ["form", "json"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_plain = "1.0.2"
 thiserror = "2.0.21"
-tower = { version = "0.5.3", default-features = false }
 tokio = { version = "1.54.1", optional = true, features = ["sync", "time"] }
 url = "2.5.9"
 uuid = { version = "1.23.1", features = ["serde"] }

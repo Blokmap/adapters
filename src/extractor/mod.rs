@@ -1,9 +1,7 @@
-//! Axum session and controller scope guards.
+//! Axum session and scope extractors.
 
-mod scope;
+pub mod scope;
 mod session;
 
-pub use scope::require_scope;
-pub use session::{DeviceSession, ProfileSession};
-
-pub use crate::authentication::JwtSession;
+pub use scope::Scope;
+pub use session::{DeviceSession, JwtSession, ProfileSession};

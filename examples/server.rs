@@ -5,18 +5,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::routing::get;
 use axum::{Json, Router};
 use blokmap_auth::Result;
-use blokmap_auth::authentication::{
-	DecodingKey,
-	EncodingKey,
-	JwtSession,
-	JwtToken,
-};
+use blokmap_auth::authentication::{DecodingKey, EncodingKey, JwtToken};
 use blokmap_auth::authorization::{
 	AuthorizationCheck,
 	AuthorizationRequirements,
 };
 use blokmap_auth::config::BlokmapAdapterConfig;
-use blokmap_auth::extractor::ProfileSession;
+use blokmap_auth::extractor::{JwtSession, ProfileSession};
 use uuid::Uuid;
 
 fn main() -> Result<()> {
@@ -39,6 +34,7 @@ fn main() -> Result<()> {
 		iat:    now,
 		jti:    Uuid::nil(),
 		scopes: vec!["core:user".into()],
+		roles: vec![]
 	};
 	let token = claims.sign("auth-key", &private)?;
 	let verified =

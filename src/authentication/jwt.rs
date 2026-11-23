@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::Result;
-use crate::authorization::TokenScope;
+use crate::authorization::{TokenRole, TokenScope};
 
 /// Blokmap JWT claims, signed and verified using caller-supplied Ed25519 keys.
 ///
@@ -33,7 +33,8 @@ pub struct JwtToken {
 	/// Issuing authority, compared exactly during verification.
 	pub iss:    String,
 	/// Subject in `service:<uuid>`, `device:<uuid>`, or `profile:<uuid>` form.
-	/// The prefix and UUID are checked when converting to a `JwtSession`.
+	/// The prefix and UUID are checked when converting to a
+	/// [`JwtSession`](crate::extractor::JwtSession).
 	pub sub:    String,
 	/// Audiences allowed to consume this token.
 	pub aud:    Vec<String>,
@@ -45,6 +46,8 @@ pub struct JwtToken {
 	pub jti:    Uuid,
 	/// Granted scopes; custom service scopes preserve their original strings.
 	pub scopes: Vec<TokenScope>,
+	/// Granted system-wide roles.
+	pub roles: Vec<TokenRole>
 }
 
 impl JwtToken {
@@ -70,7 +73,8 @@ impl JwtToken {
 	/// additionally parses the subject's principal and UUID.
 	///
 	/// ```no_run
-	/// use blokmap_auth::authentication::{DecodingKey, JwtToken, JwtSession};
+	/// use blokmap_auth::authentication::{DecodingKey, JwtToken};
+	/// use blokmap_auth::extractor::JwtSession;
 	/// # fn read(token: &str, public_pem: &[u8]) -> blokmap_auth::Result<JwtSession> {
 	/// let key = DecodingKey::from_ed_pem(public_pem)?;
 	/// let claims = JwtToken::verify(token, &key, "https://auth.example.com", "core")?;

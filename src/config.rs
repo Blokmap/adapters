@@ -108,9 +108,10 @@ impl BlokmapAdapterConfig {
 		self
 	}
 
-	/// Changes the cookie read by session.cookie_name; defaults to
-	/// `blokmap_auth`. An empty name is rejected at initialization. This does
-	/// not create, refresh, or modify response cookies.
+	/// Changes the cookie read by session extractors when no Authorization
+	/// header is present; defaults to `blokmap_auth`. An empty name is rejected
+	/// at initialization. This does not create, refresh, or modify response
+	/// cookies.
 	#[must_use]
 	pub fn cookie_name(mut self, cookie_name: impl Into<String>) -> Self {
 		self.cookie_name = cookie_name.into();

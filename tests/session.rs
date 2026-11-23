@@ -3,19 +3,24 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
-use axum::extract::State;
-use axum::http::header::COOKIE;
-use axum::http::{Request, StatusCode};
+use axum::extract::{Path, State};
+use axum::http::header::{AUTHORIZATION, COOKIE};
+use axum::http::{HeaderValue, Request, StatusCode};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use blokmap_auth::authentication::{DecodingKey, EncodingKey, JwtToken};
-use blokmap_auth::authorization::TokenScope;
+use blokmap_auth::authorization::{
+	AuthorizationPrincipal,
+	TokenRole,
+	TokenScope,
+};
 use blokmap_auth::config::BlokmapAdapterConfig;
+use blokmap_auth::extractor::scope::{AuthCheck, ImagesUpload, RequiredScope};
 use blokmap_auth::extractor::{
 	DeviceSession,
 	JwtSession,
 	ProfileSession,
-	require_scope,
+	Scope,
 };
 use jsonwebtoken::jwk::{Jwk, JwkSet};
 use jsonwebtoken::{Algorithm, Header, encode, get_current_timestamp};
@@ -34,6 +39,50 @@ struct AppState {
 	name: &'static str,
 }
 
+struct ReportsRead;
+
+impl RequiredScope for ReportsRead {
+	fn scope() -> TokenScope { "core:reports:read".into() }
+}
+
+#[test]
+fn session_access_helpers_check_admin_scope_and_profile_identity() {
+	let target = Uuid::parse_str(SUBJECT).unwrap();
+	for principal in [
+		AuthorizationPrincipal::Service,
+		AuthorizationPrincipal::Device,
+		AuthorizationPrincipal::Profile,
+	] {
+		let mut session = JwtSession {
+			sub: target,
+			principal,
+			scopes: vec![TokenScope::ImagesUpload],
+			roles: vec![],
+		};
+		assert!(!session.is_admin());
+		assert_eq!(
+			session.is_profile(target),
+			principal == AuthorizationPrincipal::Profile
+		);
+		assert!(!session.is_profile(Uuid::nil()));
+
+		session.roles = vec!["admin".parse().unwrap()];
+		assert_eq!(session.roles, vec![TokenRole::Admin]);
+		if principal == AuthorizationPrincipal::Profile {
+			assert!(session.is_admin());
+		} else {
+			assert!(!session.is_admin());
+		}
+		assert!(!session.is_profile(Uuid::nil()));
+		let json = serde_json::to_value(&session).unwrap();
+		assert_eq!(
+			serde_json::from_value::<JwtSession>(json).unwrap(),
+			session
+		);
+		assert_eq!(TokenRole::Admin.to_string(), "admin");
+	}
+}
+
 async fn request(app: &Router, cookies: &[String]) -> axum::response::Response {
 	request_path(app, "/session", cookies).await
 }
@@ -43,9 +92,21 @@ async fn request_path(
 	path: &str,
 	cookies: &[String],
 ) -> axum::response::Response {
+	request_credentials(app, path, cookies, &[]).await
+}
+
+async fn request_credentials(
+	app: &Router,
+	path: &str,
+	cookies: &[String],
+	authorization: &[HeaderValue],
+) -> axum::response::Response {
 	let mut request = Request::builder().uri(path);
 	for cookie in cookies {
 		request = request.header(COOKIE, cookie);
+	}
+	for value in authorization {
+		request = request.header(AUTHORIZATION, value);
 	}
 
 	tokio::time::timeout(
@@ -58,7 +119,7 @@ async fn request_path(
 }
 
 #[tokio::test]
-async fn extracts_only_verified_cookie_subjects() {
+async fn extracts_only_verified_bearer_and_cookie_subjects() {
 	let public_key =
 		DecodingKey::from_ed_pem(include_bytes!("keys/ed25519-public.pem"))
 			.unwrap();
@@ -116,31 +177,62 @@ async fn extracts_only_verified_cookie_subjects() {
 		)
 		.route(
 			"/scoped",
-			get(|session: JwtSession| async move { Json(session) })
-				.route_layer(require_scope(TokenScope::ImagesUpload)),
+			get(|_: Scope<ImagesUpload>, session: JwtSession| {
+				async move { Json(session) }
+			}),
 		)
 		.route(
 			"/scoped-profile",
-			get(|session: ProfileSession| async move { Json(session) })
-				.route_layer(require_scope("images:upload")),
+			get(|session: ProfileSession, _: Scope<ImagesUpload>| {
+				async move { Json(session) }
+			}),
 		)
 		.route(
 			"/custom-scope",
-			get(|session: JwtSession| async move { Json(session) })
-				.route_layer(require_scope("core:reports:read")),
+			get(|_: Scope<ReportsRead>, session: JwtSession| {
+				async move { Json(session) }
+			}),
 		)
 		.route(
 			"/multi-scope",
-			get(|session: JwtSession| async move { Json(session) })
-				.route_layer(require_scope(TokenScope::ImagesUpload))
-				.route_layer(require_scope(TokenScope::AuthCheck)),
+			get(
+				|_: Scope<ImagesUpload>,
+				 _: Scope<AuthCheck>,
+				 session: JwtSession| async move { Json(session) },
+			),
+		)
+		.route(
+			"/admin",
+			get(|session: JwtSession| {
+				async move {
+					match session.is_admin() {
+						true => StatusCode::OK,
+						false => StatusCode::FORBIDDEN,
+					}
+				}
+			}),
+		)
+		.route(
+			"/profiles/{id}",
+			get(|Path(id): Path<Uuid>, session: JwtSession| {
+				async move {
+					if session.is_admin() || session.is_profile(id) {
+						StatusCode::OK
+					} else {
+						StatusCode::FORBIDDEN
+					}
+				}
+			}),
 		)
 		.route(
 			"/body",
-			post(|_: ProfileSession, Json(body): Json<serde_json::Value>| {
-				async move { Json(body) }
-			})
-			.route_layer(require_scope(TokenScope::ImagesUpload)),
+			post(
+				|_: Scope<ImagesUpload>,
+				 _: ProfileSession,
+				 Json(body): Json<serde_json::Value>| {
+					async move { Json(body) }
+				},
+			),
 		)
 		.with_state(AppState { name: "service" });
 	let now = get_current_timestamp();
@@ -151,7 +243,8 @@ async fn extracts_only_verified_cookie_subjects() {
 		exp:    now + 3600,
 		iat:    now,
 		jti:    Uuid::nil(),
-		scopes: Vec::new(),
+		scopes: vec![],
+		roles:  vec![],
 	};
 
 	for (cookies, code) in [
@@ -201,12 +294,15 @@ async fn extracts_only_verified_cookie_subjects() {
 		assert_eq!(session.sub, Uuid::parse_str(SUBJECT).unwrap());
 		assert_eq!(
 			serde_json::to_value(session).unwrap(),
-			json!({ "sub": SUBJECT, "principal": principal, "scopes": [] })
+			json!({ "sub": SUBJECT, "principal": principal, "scopes": [], "roles": [] })
 		);
 
 		for (path, allowed) in [
 			("/profile", principal == "profile"),
 			("/device", principal == "device"),
+			(&format!("/profiles/{SUBJECT}"), principal == "profile"),
+			(&format!("/profiles/{}", Uuid::nil()), false),
+			("/admin", false),
 		] {
 			let response =
 				request_path(&app, path, &[format!("{COOKIE_NAME}={token}")])
@@ -227,6 +323,122 @@ async fn extracts_only_verified_cookie_subjects() {
 		requests.load(Ordering::SeqCst),
 		usize::from(cfg!(feature = "jwks"))
 	);
+
+	let cookie_token = claims.sign("key-1", &private_key).unwrap();
+	let fallback_cookie = [format!("{COOKIE_NAME}={cookie_token}")];
+	for principal in ["service", "device", "profile"] {
+		let mut bearer = claims.clone();
+		bearer.sub = format!("{principal}:{}", Uuid::nil());
+		bearer.scopes = vec![TokenScope::ImagesUpload];
+		let token = bearer.sign("key-1", &private_key).unwrap();
+		for scheme in ["Bearer", "bearer", "bEaReR  "] {
+			let authorization =
+				[HeaderValue::from_str(&format!("{scheme} {token}")).unwrap()];
+			for cookies in [fallback_cookie.as_slice(), &[]] {
+				let response = request_credentials(
+					&app,
+					"/session",
+					cookies,
+					&authorization,
+				)
+				.await;
+				assert_eq!(response.status(), StatusCode::OK);
+				let body = to_bytes(response.into_body(), 1024).await.unwrap();
+				let session: JwtSession =
+					serde_json::from_slice(&body).unwrap();
+				assert_eq!(session.sub, Uuid::nil());
+				assert_eq!(session.principal, principal.parse().unwrap());
+				assert_eq!(session.scopes, vec![TokenScope::ImagesUpload]);
+			}
+		}
+		let authorization =
+			[HeaderValue::from_str(&format!("Bearer {token}")).unwrap()];
+		for (path, status) in [
+			(
+				"/profile",
+				if principal == "profile" {
+					StatusCode::OK
+				} else {
+					StatusCode::FORBIDDEN
+				},
+			),
+			(
+				"/device",
+				if principal == "device" {
+					StatusCode::OK
+				} else {
+					StatusCode::FORBIDDEN
+				},
+			),
+			("/scoped", StatusCode::OK),
+			("/multi-scope", StatusCode::FORBIDDEN),
+		] {
+			assert_eq!(
+				request_credentials(
+					&app,
+					path,
+					&fallback_cookie,
+					&authorization
+				)
+				.await
+				.status(),
+				status
+			);
+		}
+		assert_eq!(
+			request_credentials(
+				&app,
+				"/session",
+				&[format!("{COOKIE_NAME}=invalid")],
+				&authorization,
+			)
+			.await
+			.status(),
+			StatusCode::OK
+		);
+	}
+	let valid_header =
+		HeaderValue::from_str(&format!("Bearer {cookie_token}")).unwrap();
+	for authorization in [
+		vec![HeaderValue::from_static("")],
+		vec![HeaderValue::from_static("Basic abc")],
+		vec![HeaderValue::from_static("Bearer")],
+		vec![HeaderValue::from_static("Bearer\ttoken")],
+		vec![HeaderValue::from_bytes(b"Bearer \xFF").unwrap()],
+		vec![valid_header.clone(), valid_header.clone()],
+		vec![valid_header.clone(), HeaderValue::from_static("Bearer invalid")],
+		vec![HeaderValue::from_static("Bearer invalid"), valid_header],
+	] {
+		for cookies in [fallback_cookie.as_slice(), &[]] {
+			let response =
+				request_credentials(&app, "/session", cookies, &authorization)
+					.await;
+			assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+			let body = to_bytes(response.into_body(), 1024).await.unwrap();
+			let error: serde_json::Value =
+				serde_json::from_slice(&body).unwrap();
+			assert_eq!(error["blokmapCode"], "MalformedAuthorizationHeader");
+			assert_eq!(error["statusCode"], 401);
+			assert!(error["info"].is_null());
+		}
+	}
+
+	let mut admin = claims.clone();
+	admin.roles = vec![TokenRole::Admin];
+	let token = admin.sign("key-1", &private_key).unwrap();
+	let cookies = [format!("{COOKIE_NAME}={token}")];
+	for path in ["/admin", &format!("/profiles/{}", Uuid::nil())] {
+		assert_eq!(
+			request_path(&app, path, &cookies).await.status(),
+			StatusCode::OK
+		);
+	}
+	let response = request_path(&app, "/scoped", &cookies).await;
+	assert_eq!(response.status(), StatusCode::FORBIDDEN);
+	let body = to_bytes(response.into_body(), 1024).await.unwrap();
+	let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+	assert_eq!(error["blokmapCode"], "MissingScope");
+	assert_eq!(error["info"], "images:upload");
 
 	let mut scoped = claims.clone();
 	scoped.scopes = vec![TokenScope::ImagesUpload];
@@ -250,25 +462,30 @@ async fn extracts_only_verified_cookie_subjects() {
 		request_path(&app, "/multi-scope", &cookies).await.status(),
 		StatusCode::FORBIDDEN
 	);
-	let response = app
-		.clone()
-		.oneshot(
-			Request::builder()
-				.method("POST")
-				.uri("/body")
-				.header(COOKIE, &cookies[0])
-				.header("content-type", "application/json")
-				.body(Body::from(r#"{"upload":"accepted"}"#))
-				.unwrap(),
-		)
-		.await
-		.unwrap();
-	assert_eq!(response.status(), StatusCode::OK);
-	let body = to_bytes(response.into_body(), 1024).await.unwrap();
-	assert_eq!(
-		serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
-		json!({"upload": "accepted"})
-	);
+	for bearer in [false, true] {
+		let request = Request::builder().method("POST").uri("/body");
+		let request = if bearer {
+			request.header(AUTHORIZATION, format!("Bearer {token}"))
+		} else {
+			request.header(COOKIE, &cookies[0])
+		};
+		let response = app
+			.clone()
+			.oneshot(
+				request
+					.header("content-type", "application/json")
+					.body(Body::from(r#"{"upload":"accepted"}"#))
+					.unwrap(),
+			)
+			.await
+			.unwrap();
+		assert_eq!(response.status(), StatusCode::OK);
+		let body = to_bytes(response.into_body(), 1024).await.unwrap();
+		assert_eq!(
+			serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+			json!({"upload": "accepted"})
+		);
+	}
 	scoped.scopes.push(TokenScope::AuthCheck);
 	let token = scoped.sign("key-1", &private_key).unwrap();
 	assert_eq!(
@@ -312,7 +529,12 @@ async fn extracts_only_verified_cookie_subjects() {
 		StatusCode::FORBIDDEN
 	);
 
-	let mut invalid = Vec::new();
+	let mut invalid = vec![
+		"invalid".to_owned(),
+		"  ".to_owned(),
+		"token extra".to_owned(),
+		"token ".to_owned(),
+	];
 	for sub in [
 		"",
 		SUBJECT,
@@ -348,11 +570,31 @@ async fn extracts_only_verified_cookie_subjects() {
 		encode(&Header::new(Algorithm::HS256), &claims, &secret).unwrap(),
 	);
 	for token in invalid {
-		for path in ["/session", "/profile", "/device", "/scoped"] {
+		for path in [
+			"/session",
+			"/profile",
+			"/device",
+			"/scoped",
+			"/custom-scope",
+			"/multi-scope",
+			"/admin",
+		] {
 			assert_eq!(
 				request_path(&app, path, &[format!("{COOKIE_NAME}={token}")])
 					.await
 					.status(),
+				StatusCode::UNAUTHORIZED
+			);
+			assert_eq!(
+				request_credentials(
+					&app,
+					path,
+					&fallback_cookie,
+					&[HeaderValue::from_str(&format!("Bearer {token}"))
+						.unwrap()],
+				)
+				.await
+				.status(),
 				StatusCode::UNAUTHORIZED
 			);
 		}
