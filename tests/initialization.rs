@@ -39,7 +39,7 @@ async fn initialization_is_atomic_and_local_verification_bypasses_jwks() {
 		iat:    now,
 		jti:    uuid::Uuid::nil(),
 		scopes: vec![],
-		roles: vec![]
+		roles:  vec![],
 	};
 	let key =
 		EncodingKey::from_ed_pem(include_bytes!("keys/ed25519-private.pem"))

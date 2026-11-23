@@ -2,16 +2,14 @@
 
 mod permissions;
 mod principal;
+mod role;
 mod scope;
 mod service;
-mod role;
 
-pub use role::{TokenRole};
 pub use permissions::{InstitutionPermissions, LocationPermissions};
 pub use principal::AuthorizationPrincipal;
+pub use role::TokenRole;
 pub use scope::{PermissionScope, TokenScope};
-
 #[cfg(feature = "authorization")]
 pub use service::AuthorizationService;
-
 pub use service::{AuthorizationCheck, AuthorizationRequirements};

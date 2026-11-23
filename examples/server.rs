@@ -34,7 +34,7 @@ fn main() -> Result<()> {
 		iat:    now,
 		jti:    Uuid::nil(),
 		scopes: vec!["core:user".into()],
-		roles: vec![]
+		roles:  vec![],
 	};
 	let token = claims.sign("auth-key", &private)?;
 	let verified =

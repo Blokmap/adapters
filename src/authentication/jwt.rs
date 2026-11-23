@@ -47,7 +47,7 @@ pub struct JwtToken {
 	/// Granted scopes; custom service scopes preserve their original strings.
 	pub scopes: Vec<TokenScope>,
 	/// Granted system-wide roles.
-	pub roles: Vec<TokenRole>
+	pub roles:  Vec<TokenRole>,
 }
 
 impl JwtToken {
