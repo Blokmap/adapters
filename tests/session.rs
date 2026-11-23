@@ -15,7 +15,6 @@ use blokmap_auth::authorization::{
 	TokenScope,
 };
 use blokmap_auth::config::BlokmapAdapterConfig;
-use blokmap_auth::extractor::scope::{AuthCheck, ImagesUpload, RequiredScope};
 use blokmap_auth::extractor::{
 	DeviceSession,
 	JwtSession,
@@ -37,12 +36,6 @@ const SUBJECT: &str = "019ab123-4567-7890-abcd-123456789abc";
 #[derive(Clone)]
 struct AppState {
 	name: &'static str,
-}
-
-struct ReportsRead;
-
-impl RequiredScope for ReportsRead {
-	fn scope() -> TokenScope { "core:reports:read".into() }
 }
 
 #[test]
@@ -177,27 +170,27 @@ async fn extracts_only_verified_bearer_and_cookie_subjects() {
 		)
 		.route(
 			"/scoped",
-			get(|_: Scope<ImagesUpload>, session: JwtSession| {
+			get(|_: Scope<"images:upload">, session: JwtSession| {
 				async move { Json(session) }
 			}),
 		)
 		.route(
 			"/scoped-profile",
-			get(|session: ProfileSession, _: Scope<ImagesUpload>| {
+			get(|session: ProfileSession, _: Scope<"images:upload">| {
 				async move { Json(session) }
 			}),
 		)
 		.route(
 			"/custom-scope",
-			get(|_: Scope<ReportsRead>, session: JwtSession| {
+			get(|_: Scope<"core:reports:read">, session: JwtSession| {
 				async move { Json(session) }
 			}),
 		)
 		.route(
 			"/multi-scope",
 			get(
-				|_: Scope<ImagesUpload>,
-				 _: Scope<AuthCheck>,
+				|_: Scope<"images:upload">,
+				 _: Scope<"auth:check">,
 				 session: JwtSession| async move { Json(session) },
 			),
 		)
@@ -227,7 +220,7 @@ async fn extracts_only_verified_bearer_and_cookie_subjects() {
 		.route(
 			"/body",
 			post(
-				|_: Scope<ImagesUpload>,
+				|_: Scope<"images:upload">,
 				 _: ProfileSession,
 				 Json(body): Json<serde_json::Value>| {
 					async move { Json(body) }

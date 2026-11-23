@@ -3,9 +3,7 @@ use jsonwebtoken::{
 	DecodingKey,
 	EncodingKey,
 	Header,
-	Validation,
-	decode,
-	encode,
+	Validation
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -61,7 +59,7 @@ impl JwtToken {
 	pub fn sign(&self, kid: &str, private_key: &EncodingKey) -> Result<String> {
 		let mut header = Header::new(Algorithm::EdDSA);
 		header.kid = Some(kid.to_owned());
-		Ok(encode(&header, self, private_key)?)
+		Ok(jsonwebtoken::encode(&header, self, private_key)?)
 	}
 
 	/// Verifies the signature, issuer, audience, expiration, and required
@@ -96,7 +94,6 @@ impl JwtToken {
 		validation.set_issuer(&[issuer]);
 		validation.set_audience(&[audience]);
 		validation.set_required_spec_claims(&["iss", "sub", "aud", "exp"]);
-
-		Ok(decode::<Self>(token, public_key, &validation)?.claims)
+		Ok(jsonwebtoken::decode::<Self>(token, public_key, &validation)?.claims)
 	}
 }

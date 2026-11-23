@@ -203,6 +203,7 @@ impl<S: Send + Sync> FromRequestParts<S> for JwtSession {
 		if parts.headers.get_all(AUTHORIZATION).iter().count() > 1 {
 			return Err(Error::MalformedAuthorizationHeader);
 		}
+
 		let bearer: Option<TypedHeader<Authorization<Bearer>>> = parts
 			.extract()
 			.await

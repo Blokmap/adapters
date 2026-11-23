@@ -73,11 +73,10 @@
 //! ```no_run
 //! use axum::routing::post;
 //! use axum::{Json, Router};
-//! use blokmap_auth::extractor::scope::ImagesUpload;
 //! use blokmap_auth::extractor::{ProfileSession, Scope};
 //!
 //! async fn upload(
-//! 	_: Scope<ImagesUpload>,
+//! 	_: Scope<"images:upload">,
 //! 	session: ProfileSession,
 //! ) -> Json<ProfileSession> {
 //! 	Json(session)
@@ -98,10 +97,12 @@
 //! `nbf` is ignored, following the JWT library's defaults.
 //!
 //! Missing or invalid credentials return 401; a wrong principal or missing
-//! scope returns 403. `Scope<ImagesUpload>` and other built-in markers require
-//! exact scopes; implement `extractor::scope::RequiredScope` for custom scopes.
-//! Scope extractors preserve request bodies. Handlers can return the root
-//! `Result<T>` for structured JSON errors.
+//! scope returns 403. `Scope<"images:upload">` requires an exact scope; custom
+//! scopes work the same way, for example `Scope<"core:reports:read">`.
+//! Compiling this crate requires nightly Rust for string const parameters
+//! (`adt_const_params` and `unsized_const_params`). Scope extractors preserve
+//! request bodies. Handlers can return the root `Result<T>` for structured
+//! JSON errors.
 //!
 //! `session.is_admin()` checks for `TokenScope::SystemAdmin` (`system:admin`).
 //! `session.is_profile(id)` checks both the profile principal and subject UUID.
@@ -111,6 +112,8 @@
 //! See `examples/service.rs` for a remote consumer and `examples/server.rs`
 //! for local signing, verification, and extractor setup.
 
+#![feature(adt_const_params, unsized_const_params)]
+#![allow(incomplete_features)]
 #![warn(missing_docs)]
 
 pub mod authentication;

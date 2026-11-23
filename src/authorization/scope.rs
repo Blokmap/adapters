@@ -52,11 +52,27 @@ impl From<&str> for TokenScope {
 ///
 /// Pair the resource UUID with the corresponding permission bitflags. JSON
 /// uses lowercase names; see [`super::AuthorizationCheck`] for an example.
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PermissionScope {
 	/// A location; pair with [`super::LocationPermissions`].
 	Location,
 	/// An institution; pair with [`super::InstitutionPermissions`].
 	Institution,
+	/// Other scopes are preserved verbatim.
+	#[serde(untagged)]
+	Other(String),
+}
+
+serde_plain::derive_display_from_serialize!(PermissionScope);
+serde_plain::derive_fromstr_from_deserialize!(PermissionScope);
+
+impl From<String> for PermissionScope {
+	fn from(value: String) -> Self {
+		serde_plain::from_str(&value).unwrap_or(Self::Other(value))
+	}
+}
+
+impl From<&str> for PermissionScope {
+	fn from(value: &str) -> Self { Self::from(value.to_owned()) }
 }

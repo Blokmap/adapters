@@ -163,7 +163,9 @@ impl JwksManager {
 		let keys = self.client.get(JWKS_ENDPOINT).await?.json().await?;
 		let fetched_at = Instant::now();
 		let current = Arc::new(CachedJwks { keys, fetched_at });
+		
 		self.current.store(Some(current.clone()));
+
 		Ok(current)
 	}
 }

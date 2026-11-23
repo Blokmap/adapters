@@ -158,6 +158,7 @@ impl BlokmapAdapterConfig {
 				"the session cookie name must not be empty".into(),
 			));
 		}
+
 		Ok(())
 	}
 

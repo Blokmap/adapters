@@ -51,6 +51,7 @@ pub fn initialize(config: BlokmapAdapterConfig) -> Result<()> {
 	} else {
 		None
 	};
+
 	#[cfg(feature = "authorization")]
 	let authorization = AuthorizationService::from_config(&config)?;
 

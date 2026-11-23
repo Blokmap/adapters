@@ -21,4 +21,5 @@ pub enum AuthorizationPrincipal {
 	Profile,
 }
 
+serde_plain::derive_display_from_serialize!(AuthorizationPrincipal);
 serde_plain::derive_fromstr_from_deserialize!(AuthorizationPrincipal);

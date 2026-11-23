@@ -12,7 +12,6 @@ use blokmap_auth::authorization::{
 };
 use blokmap_auth::client::HttpClient;
 use blokmap_auth::config::BlokmapAdapterConfig;
-use blokmap_auth::extractor::scope::ImagesUpload;
 use blokmap_auth::extractor::{
 	DeviceSession,
 	JwtSession,
@@ -53,7 +52,7 @@ async fn profile(session: ProfileSession) -> Json<ProfileSession> {
 async fn device(session: DeviceSession) -> Json<DeviceSession> { Json(session) }
 
 async fn upload(
-	_: Scope<ImagesUpload>,
+	_: Scope<"images:upload">,
 	session: ProfileSession,
 ) -> Json<ProfileSession> {
 	Json(session)
