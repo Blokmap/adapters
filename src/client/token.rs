@@ -1,82 +1,65 @@
 use std::sync::Arc;
 
 use arc_swap::ArcSwapOption;
-use reqwest::Method;
-use reqwest::header::HeaderValue;
-use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex;
-use url::Url;
-use url::form_urlencoded::byte_serialize;
+use openidconnect::core::{CoreClient, CoreProviderMetadata, CoreTokenType};
+use openidconnect::{ClientId, ClientSecret, OAuth2TokenResponse, Scope};
+use tokio::sync::{Mutex, OnceCell};
+use tokio::time::Instant;
 
 use crate::authorization::TokenScope;
 use crate::client::{HttpClient, HttpUnauthenticated};
 use crate::config::BlokmapAdapterConfig;
 use crate::{Error, Result};
 
-const TOKEN_ENDPOINT: &str = "auth/service";
-
-#[derive(Serialize)]
-struct TokenRequest {
-	grant_type: &'static str,
-	#[serde(skip_serializing_if = "String::is_empty")]
-	scope:      String,
-}
-
-impl From<&[TokenScope]> for TokenRequest {
-	fn from(scopes: &[TokenScope]) -> Self {
-		let scope = scopes
-			.iter()
-			.map(ToString::to_string)
-			.collect::<Vec<_>>()
-			.join(" ");
-
-		Self { grant_type: "client_credentials", scope }
-	}
-}
-
-#[derive(Deserialize)]
-struct TokenResponse {
-	access_token: String,
-	token_type:   String,
-}
-
-/// A shared snapshot of an authorization header and its generation.
-#[derive(Debug)]
+/// A shared access token and its generation.
 pub(super) struct CachedAccessToken {
-	/// The complete authorization header value, including the Bearer prefix.
-	pub(super) value:      HeaderValue,
+	/// The access token, without the Bearer prefix.
+	pub(super) value:      String,
 	/// The version used to detect whether the token has been replaced.
 	pub(super) generation: u64,
+	expires_at:            Option<Instant>,
 }
 
 /// Shares token snapshots and serializes token replacements.
 pub(super) struct AccessTokenManager {
+	config:       Arc<BlokmapAdapterConfig>,
 	/// The token snapshot, empty until the first authenticated request.
 	current:      ArcSwapOption<CachedAccessToken>,
 	/// Serializes the initial fetch and token refreshes.
 	refresh_lock: Mutex<()>,
-	/// Fetches service tokens without bearer authentication.
 	client:       HttpClient<HttpUnauthenticated>,
+	/// Provider endpoints; public keys are not needed to obtain access tokens.
+	metadata:     OnceCell<CoreProviderMetadata>,
 	/// Scopes requested for the initial token and every refresh.
-	scopes:       Vec<TokenScope>,
+	scopes:       Vec<Scope>,
 }
 
 impl AccessTokenManager {
 	/// Creates a manager without fetching a token.
-	pub(super) fn new(auth_api_url: Url, scopes: &[TokenScope]) -> Self {
-		let client = HttpClient::<HttpUnauthenticated>::new(auth_api_url);
+	pub(super) fn new(
+		config: Arc<BlokmapAdapterConfig>,
+		scopes: &[TokenScope],
+	) -> Result<Self> {
+		let client =
+			HttpClient::for_oidc(config.require_auth_api_url()?.clone())?;
+		let scopes =
+			scopes.iter().map(|scope| Scope::new(scope.to_string())).collect();
 
-		Self {
+		Ok(Self {
+			config,
 			current: ArcSwapOption::empty(),
 			refresh_lock: Mutex::new(()),
 			client,
-			scopes: scopes.to_vec(),
-		}
+			metadata: OnceCell::new(),
+			scopes,
+		})
 	}
 
 	/// Returns the current token, fetching it on first use.
 	pub(super) async fn current(&self) -> Result<Arc<CachedAccessToken>> {
-		if let Some(token) = self.current.load_full() {
+		if let Some(token) = self.current.load_full()
+			&& token.expires_at.is_none_or(|expires| Instant::now() < expires)
+		{
 			return Ok(token);
 		}
 
@@ -89,7 +72,7 @@ impl AccessTokenManager {
 	///
 	/// # Errors
 	///
-	/// Propagates token-fetch and header-validation errors.
+	/// Propagates token-fetch errors.
 	pub(super) async fn try_refresh(
 		&self,
 		used_generation: Option<u64>,
@@ -100,16 +83,14 @@ impl AccessTokenManager {
 
 		// Another request already fetched or refreshed the token.
 		if let Some(token) = &current
+			&& token.expires_at.is_none_or(|expires| Instant::now() < expires)
 			&& Some(token.generation) != used_generation
 		{
 			return Ok(token.clone());
 		}
 
-		// Only one request reaches this point at a time.
-		let value = self.fetch().await?;
-
 		let generation = current.map_or(0, |token| token.generation + 1);
-		let next = Arc::new(CachedAccessToken { value, generation });
+		let next = Arc::new(self.fetch(generation).await?);
 
 		self.current.store(Some(next.clone()));
 
@@ -117,37 +98,44 @@ impl AccessTokenManager {
 	}
 
 	/// Fetches and validates a Bearer token using client credentials.
-	async fn fetch(&self) -> Result<HeaderValue> {
-		let config = BlokmapAdapterConfig::global()?;
-		let request = TokenRequest::from(self.scopes.as_slice());
+	async fn fetch(&self, generation: u64) -> Result<CachedAccessToken> {
+		let config = &self.config;
+		let metadata = self
+			.metadata
+			.get_or_try_init(|| {
+				async {
+					let issuer = config.issuer()?;
 
-		let client_id =
-			byte_serialize(config.client_id.as_bytes()).collect::<String>();
-		let client_secret =
-			byte_serialize(config.client_secret.as_bytes()).collect::<String>();
-
-		let response = self
-			.client
-			.build_request::<()>(TOKEN_ENDPOINT, None, Method::POST)?
-			.basic_auth(client_id, Some(client_secret))
-			.form(&request)
-			.send()
+					self.client.discover(&issuer).await
+				}
+			})
 			.await?;
 
-		if !response.status().is_success() {
-			return Err(Error::HttpStatus(response.status()));
+		let client = CoreClient::from_provider_metadata(
+			metadata.clone(),
+			ClientId::new(config.client_id.clone()),
+			Some(ClientSecret::new(config.client_secret.clone())),
+		);
+
+		let requested_at = Instant::now();
+		let token = client
+			.exchange_client_credentials()
+			.map_err(|error| Error::InvalidConfiguration(error.to_string()))?
+			.add_scopes(self.scopes.clone())
+			.request_async(&self.client)
+			.await?;
+
+		if token.token_type() != &CoreTokenType::Bearer {
+			return Err(Error::UnsupportedTokenType(
+				token.token_type().as_ref().into(),
+			));
 		}
 
-		let token: TokenResponse = response.json().await?;
+		let value = token.access_token().secret().to_owned();
 
-		if !token.token_type.eq_ignore_ascii_case("Bearer") {
-			return Err(Error::UnsupportedTokenType(token.token_type));
-		}
+		let expires_at =
+			token.expires_in().and_then(|ttl| requested_at.checked_add(ttl));
 
-		let mut value =
-			HeaderValue::from_str(&format!("Bearer {}", token.access_token))?;
-		value.set_sensitive(true);
-
-		Ok(value)
+		Ok(CachedAccessToken { value, generation, expires_at })
 	}
 }

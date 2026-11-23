@@ -11,16 +11,15 @@ use jsonwebtoken::jwk::{
 	PublicKeyUse,
 };
 use jsonwebtoken::{Algorithm, DecodingKey, decode_header};
+use openidconnect::IssuerUrl;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
 
 use crate::authentication::JwtToken;
 use crate::client::{HttpClient, HttpUnauthenticated};
 use crate::config::BlokmapAdapterConfig;
-use crate::runtime::Runtime;
 use crate::{Error, Result};
 
-const JWKS_ENDPOINT: &str = ".well-known/jwks.json";
 const REFRESH_INTERVAL_SECS: u64 = 10 * 60;
 
 struct CachedJwks {
@@ -30,52 +29,45 @@ struct CachedJwks {
 
 /// Remote Ed25519 verification using the configured auth service's JWKS.
 ///
-/// Enable `jwks`, initialize the library, and borrow [`Self::global`] to verify
-/// raw tokens outside Axum. JwtSession.cookie_name use this cache
+/// Enable `jwks`, build an adapter, and borrow `adapter.jwks()` to
+/// verify raw tokens outside Axum. Session extractors use this cache
 /// automatically. Auth servers that already own their keys should use
 /// `JwtToken::verify` directly or configure a local verification key for
-/// request.cookie_name.
+/// request verification.
 ///
-/// Keys are fetched lazily from `/.well-known/jwks.json`. The first request
-/// after ten minutes refreshes them; concurrent requests share that refresh.
+/// The issuer's OIDC metadata supplies `jwks_uri`. The library's HTTP client
+/// fetches the keys into an `ArcSwap` snapshot. The first request after ten
+/// minutes refreshes them; concurrent requests share that refresh.
 /// An unknown `kid` does not force an early refresh. Fetch failures propagate
 /// and expired key snapshots are not used for verification.
 ///
 /// ```no_run
-/// use blokmap_auth::authentication::JwksManager;
+/// # #[cfg(feature = "jwks")]
+/// # async fn read(adapter: &blokmap_auth::BlokmapAuthAdapter, token: &str) -> blokmap_auth::Result<blokmap_auth::extractor::JwtSession> {
 /// use blokmap_auth::extractor::JwtSession;
-/// # async fn read(token: &str) -> blokmap_auth::Result<JwtSession> {
-/// let claims = JwksManager::global()?.verify(token).await?;
+/// let claims = adapter.jwks()?.verify(token).await?;
 /// JwtSession::try_from(claims)
 /// # }
 /// ```
 pub struct JwksManager {
 	current:      ArcSwapOption<CachedJwks>,
 	refresh_lock: Mutex<()>,
-	client:       HttpClient,
+	client:       HttpClient<HttpUnauthenticated>,
+	issuer:       IssuerUrl,
+	audience:     String,
 }
 
 impl JwksManager {
-	/// Borrows the shared remote cache created by `initialize`.
-	/// Returns [`Error::AdapterNotInitialized`] before initialization, or
-	/// [`Error::InvalidConfiguration`] when a local verification key is used.
-	pub fn global() -> Result<&'static Self> {
-		Runtime::global()?.jwks.as_ref().ok_or_else(|| {
-			Error::InvalidConfiguration(
-				"local JWT verification is configured".into(),
-			)
-		})
-	}
-
 	pub(crate) fn from_config(config: &BlokmapAdapterConfig) -> Result<Self> {
-		let client = HttpClient::<HttpUnauthenticated>::new(
-			config.auth_api_url()?.clone(),
-		);
+		let issuer = config.issuer()?;
+		let client = HttpClient::for_oidc(issuer.url().clone())?;
 
 		Ok(Self {
 			current: ArcSwapOption::empty(),
 			refresh_lock: Mutex::new(()),
 			client,
+			issuer,
+			audience: config.jwt_audience.clone(),
 		})
 	}
 
@@ -93,7 +85,6 @@ impl JwksManager {
 	/// [`Error::InvalidJwk`]. Requests needed to load keys can also return
 	/// transport or upstream status errors.
 	pub async fn verify(&self, token: &str) -> Result<JwtToken> {
-		let config = BlokmapAdapterConfig::global()?;
 		let header = decode_header(token)?;
 
 		if header.alg != Algorithm::EdDSA {
@@ -103,7 +94,7 @@ impl JwksManager {
 		let kid = header.kid.ok_or(Error::MissingJwtKeyId)?;
 		let key = self.public_key(&kid).await?;
 
-		JwtToken::verify(token, &key, &config.jwt_issuer, &config.jwt_audience)
+		JwtToken::verify(token, &key, self.issuer.as_str(), &self.audience)
 	}
 
 	/// Gets an Ed25519 verification key by `kid`.
@@ -156,16 +147,26 @@ impl JwksManager {
 		}
 
 		let _guard = self.refresh_lock.lock().await;
+
 		if let Some(current) = self.cached() {
 			return Ok(current);
 		}
 
-		let keys = self.client.get(JWKS_ENDPOINT).await?.json().await?;
-		let fetched_at = Instant::now();
-		let current = Arc::new(CachedJwks { keys, fetched_at });
-		
+		let current = Arc::new(self.fetch().await?);
+
 		self.current.store(Some(current.clone()));
 
 		Ok(current)
+	}
+
+	async fn fetch(&self) -> Result<CachedJwks> {
+		let metadata = self.client.discover(&self.issuer).await?;
+		let url = metadata.jwks_uri().url().clone();
+
+		let keys = self.client.get_url(&url).await?.json().await?;
+
+		let fetched_at = Instant::now();
+
+		Ok(CachedJwks { keys, fetched_at })
 	}
 }

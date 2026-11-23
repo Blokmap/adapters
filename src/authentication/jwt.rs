@@ -1,11 +1,7 @@
-use jsonwebtoken::{
-	Algorithm,
-	DecodingKey,
-	EncodingKey,
-	Header,
-	Validation
-};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use serde_with::formats::SpaceSeparator;
+use serde_with::{OneOrMany, StringWithSeparator, serde_as};
 use uuid::Uuid;
 
 use crate::Result;
@@ -13,9 +9,10 @@ use crate::authorization::{TokenRole, TokenScope};
 
 /// Blokmap JWT claims, signed and verified using caller-supplied Ed25519 keys.
 ///
-/// Always available, without HTTP clients or library initialization.
-/// All fields are required when deserializing a token. Timestamps are Unix
-/// seconds; the issuer chooses IDs, scopes, audiences, and expiration.
+/// Always available, without HTTP clients or an adapter.
+/// Timestamps are Unix seconds; the issuer chooses IDs, scopes, audiences,
+/// and expiration. Scopes use the space-delimited `scope` claim; audiences
+/// accept a string or array. Missing scopes and roles default to empty lists.
 /// Signing does not fill in or validate those claim values automatically.
 ///
 /// ```no_run
@@ -26,6 +23,7 @@ use crate::authorization::{TokenRole, TokenScope};
 /// claims.sign("auth-key-1", &key)
 /// # }
 /// ```
+#[serde_as]
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct JwtToken {
 	/// Issuing authority, compared exactly during verification.
@@ -35,6 +33,7 @@ pub struct JwtToken {
 	/// [`JwtSession`](crate::extractor::JwtSession).
 	pub sub:    String,
 	/// Audiences allowed to consume this token.
+	#[serde_as(as = "OneOrMany<_>")]
 	pub aud:    Vec<String>,
 	/// Expiration timestamp, in Unix seconds.
 	pub exp:    u64,
@@ -42,9 +41,13 @@ pub struct JwtToken {
 	pub iat:    u64,
 	/// Issuer-assigned token identifier.
 	pub jti:    Uuid,
-	/// Granted scopes; custom service scopes preserve their original strings.
+	/// Granted scopes, encoded in the standard space-delimited `scope` claim.
+	/// Every value must match a declared [`TokenScope`] variant.
+	#[serde(default, rename = "scope", skip_serializing_if = "Vec::is_empty")]
+	#[serde_as(as = "StringWithSeparator<SpaceSeparator, TokenScope>")]
 	pub scopes: Vec<TokenScope>,
 	/// Granted system-wide roles.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub roles:  Vec<TokenRole>,
 }
 

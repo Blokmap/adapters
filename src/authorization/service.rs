@@ -1,5 +1,8 @@
 //! Permission checks against the authentication service.
 
+#[cfg(feature = "authorization")]
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -12,8 +15,6 @@ use crate::authorization::{AuthorizationPrincipal, PermissionScope};
 use crate::client::{HttpAuthenticated, HttpClient};
 #[cfg(feature = "authorization")]
 use crate::config::BlokmapAdapterConfig;
-#[cfg(feature = "authorization")]
-use crate::runtime::Runtime;
 
 #[cfg(feature = "authorization")]
 const REQUIRED_SCOPES: &[TokenScope] = &[
@@ -88,14 +89,15 @@ pub struct AuthorizationCheck {
 
 /// Checks permissions against the authentication service.
 ///
-/// Enable `authorization`, initialize the library, and borrow [`Self::global`].
-/// The library owns its HTTP client and service-token cache. Cloned handles
+/// Enable `authorization` and borrow `adapter.authorization()`.
+/// The adapter owns its HTTP client and service-token cache. Cloned handles
 /// share both, and tokens are obtained on first use.
 ///
 /// ```no_run
-/// use blokmap_auth::authorization::{AuthorizationCheck, AuthorizationService};
-/// # async fn authorize(check: &AuthorizationCheck) -> blokmap_auth::Result<()> {
-/// AuthorizationService::global()?.check(check).await
+/// use blokmap_auth::BlokmapAuthAdapter;
+/// use blokmap_auth::authorization::AuthorizationCheck;
+/// # async fn authorize(adapter: &BlokmapAuthAdapter, check: AuthorizationCheck) -> blokmap_auth::Result<()> {
+/// adapter.authorization()?.check(check).await
 /// # }
 /// ```
 #[derive(Clone)]
@@ -106,15 +108,11 @@ pub struct AuthorizationService {
 
 #[cfg(feature = "authorization")]
 impl AuthorizationService {
-	/// Borrows the shared client configured by [`crate::initialize`].
-	/// Returns `Error::AdapterNotInitialized` if startup has not completed.
-	pub fn global() -> Result<&'static Self> {
-		Ok(&Runtime::global()?.authorization)
-	}
-
-	pub(crate) fn from_config(config: &BlokmapAdapterConfig) -> Result<Self> {
+	pub(crate) fn from_config(
+		config: Arc<BlokmapAdapterConfig>,
+	) -> Result<Self> {
 		let client = HttpClient::<HttpAuthenticated>::from_config(
-			config.auth_api_url()?.clone(),
+			config.require_auth_api_url()?.clone(),
 			REQUIRED_SCOPES,
 			config,
 		)?;
@@ -131,8 +129,8 @@ impl AuthorizationService {
 	/// Non-success statuses are preserved in `Error::HttpStatus`. Token
 	/// fetching, serialization, and transport failures propagate. A second 401
 	/// following a token refresh produces `Error::Unauthenticated`.
-	pub async fn check(&self, request: &AuthorizationCheck) -> Result<()> {
-		self.client.post("authorization/check", request).await?;
+	pub async fn check(&self, request: AuthorizationCheck) -> Result<()> {
+		self.client.post("authorization/check", &request).await?;
 		Ok(())
 	}
 }

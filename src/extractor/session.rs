@@ -1,7 +1,8 @@
 use std::ops::Deref;
+use std::sync::Arc;
 
 use axum::RequestPartsExt;
-use axum::extract::FromRequestParts;
+use axum::extract::{FromRef, FromRequestParts};
 use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
 use axum_extra::TypedHeader;
@@ -11,12 +12,9 @@ use axum_extra::headers::authorization::Bearer;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-#[cfg(feature = "jwks")]
-use crate::authentication::JwksManager;
 use crate::authentication::JwtToken;
 use crate::authorization::{AuthorizationPrincipal, TokenRole, TokenScope};
-use crate::config::BlokmapAdapterConfig;
-use crate::{Error, Result};
+use crate::{BlokmapAuthAdapter, Error, Result};
 
 /// Identity and scopes read from a verified JWT.
 ///
@@ -28,7 +26,8 @@ use crate::{Error, Result};
 /// back to it. The cookie is used only when the Authorization header is absent.
 ///
 /// The session is reused by other session and scope extractors within the
-/// request. No authentication fields are needed in Axum state.
+/// request. Axum state supplies `Arc<BlokmapAuthAdapter>` directly or through
+/// `FromRef`. Each adapter's request verification is cached independently.
 ///
 /// `JwtSession::try_from(claims)` only parses the principal and subject UUID;
 /// first verify the claims with [`JwtToken::verify`] or remote JWKS
@@ -53,13 +52,19 @@ pub struct JwtSession {
 	pub principal: AuthorizationPrincipal,
 	/// Scopes granted by the JWT issuer, available for application checks.
 	pub scopes:    Vec<TokenScope>,
-	/// Roles granted by the JWT issues, available for application checks.
+	/// Roles granted by the JWT issuer, available for application checks.
 	pub roles:     Vec<TokenRole>,
 }
 
+#[derive(Clone)]
+struct VerifiedSession {
+	adapter: Arc<BlokmapAuthAdapter>,
+	session: JwtSession,
+}
+
 impl JwtSession {
-	/// Whether the token grants system-wide administration via `system:admin`.
-	/// This does not imply any other scope or require a particular principal.
+	/// Whether this is a profile session with the administrator role.
+	/// This does not imply any scope grant.
 	#[must_use]
 	pub fn is_admin(&self) -> bool {
 		self.principal == AuthorizationPrincipal::Profile
@@ -101,8 +106,8 @@ impl TryFrom<JwtToken> for JwtSession {
 /// Accepts a Bearer header or the configured cookie, following [`JwtSession`]'s
 /// credential precedence.
 ///
-/// Initialize the library once; no authentication fields are needed in the
-/// application's state. Verification checks the signature, issuer, audience,
+/// Supply the adapter through application state, as for [`JwtSession`].
+/// Verification checks the signature, issuer, audience,
 /// and expiration using the configured local key or JWKS cache. Invalid tokens
 /// reject with 401; another valid principal rejects with 403.
 ///
@@ -189,15 +194,22 @@ impl From<DeviceSession> for JwtSession {
 	fn from(session: DeviceSession) -> Self { session.0 }
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for JwtSession {
+impl<S> FromRequestParts<S> for JwtSession
+where
+	S: Send + Sync,
+	Arc<BlokmapAuthAdapter>: FromRef<S>,
+{
 	type Rejection = Error;
 
-	async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self> {
-		if let Some(session) = parts.extensions.get::<Self>() {
-			return Ok(session.clone());
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+		let adapter = Arc::<BlokmapAuthAdapter>::from_ref(state);
+
+		if let Some(cached) = parts.extensions.get::<VerifiedSession>()
+			&& Arc::ptr_eq(&cached.adapter, &adapter)
+		{
+			return Ok(cached.session.clone());
 		}
 
-		let config = BlokmapAdapterConfig::global()?;
 		let cookies = CookieJar::from_headers(&parts.headers);
 
 		if parts.headers.get_all(AUTHORIZATION).iter().count() > 1 {
@@ -209,40 +221,29 @@ impl<S: Send + Sync> FromRequestParts<S> for JwtSession {
 			.await
 			.map_err(|_| Error::MalformedAuthorizationHeader)?;
 
-		let access_token = match (&bearer, cookies.get(&config.cookie_name)) {
-			(Some(header), _) => header.token(),
-			(None, Some(cookie)) => cookie.value(),
-			_ => return Err(Error::MissingAccessToken),
-		};
+		let access_token =
+			match (&bearer, cookies.get(&adapter.config.cookie_name)) {
+				(Some(header), _) => header.token(),
+				(None, Some(cookie)) => cookie.value(),
+				_ => return Err(Error::MissingAccessToken),
+			};
 
-		let jwt_token = if let Some(key) = &config.verification_key {
-			JwtToken::verify(
-				access_token,
-				key,
-				&config.jwt_issuer,
-				&config.jwt_audience,
-			)?
-		} else {
-			#[cfg(feature = "jwks")]
-			{
-				JwksManager::global()?.verify(access_token).await?
-			}
-			#[cfg(not(feature = "jwks"))]
-			{
-				return Err(Error::InvalidConfiguration(
-					"JWT verification is not configured".into(),
-				));
-			}
-		};
-
+		let jwt_token = adapter.verify(access_token).await?;
 		let session = Self::try_from(jwt_token)?;
-		parts.extensions.insert(session.clone());
+
+		parts
+			.extensions
+			.insert(VerifiedSession { adapter, session: session.clone() });
 
 		Ok(session)
 	}
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for ProfileSession {
+impl<S> FromRequestParts<S> for ProfileSession
+where
+	S: Send + Sync,
+	Arc<BlokmapAuthAdapter>: FromRef<S>,
+{
 	type Rejection = Error;
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
@@ -251,7 +252,11 @@ impl<S: Send + Sync> FromRequestParts<S> for ProfileSession {
 	}
 }
 
-impl<S: Send + Sync> FromRequestParts<S> for DeviceSession {
+impl<S> FromRequestParts<S> for DeviceSession
+where
+	S: Send + Sync,
+	Arc<BlokmapAuthAdapter>: FromRef<S>,
+{
 	type Rejection = Error;
 
 	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {

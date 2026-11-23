@@ -7,6 +7,15 @@ use serde::Serialize;
 
 use crate::authorization::TokenScope;
 
+#[cfg(any(feature = "client", feature = "jwks"))]
+type OidcHttpError = openidconnect::HttpClientError<reqwest::Error>;
+
+#[cfg(any(feature = "client", feature = "jwks"))]
+type DiscoveryError = openidconnect::DiscoveryError<OidcHttpError>;
+
+#[cfg(feature = "client")]
+type TokenError = openidconnect::core::CoreRequestTokenError<OidcHttpError>;
+
 /// Configuration, JWT validation, authorization, and transport failures.
 ///
 /// Match the variants relevant to your application and keep a fallback arm:
@@ -22,12 +31,6 @@ use crate::authorization::TokenScope;
 #[non_exhaustive]
 #[serde(tag = "blokmapCode", content = "info", rename_all = "PascalCase")]
 pub enum Error {
-	/// The library has not been initialized.
-	#[error("global BlokmapAuthAdapter has not been initialized")]
-	AdapterNotInitialized,
-	/// The library has already been initialized.
-	#[error("global BlokmapAuthAdapter is already initialized")]
-	AdapterAlreadyInitialized,
 	/// Required settings are absent or invalid for an enabled capability.
 	#[error("invalid auth configuration: {0}")]
 	InvalidConfiguration(String),
@@ -71,13 +74,21 @@ pub enum Error {
 	#[cfg(feature = "client")]
 	#[error("unsupported token type: {0}")]
 	UnsupportedTokenType(String),
-	/// The token cannot be represented as an Authorization header.
+	/// The OAuth client-credentials exchange failed.
 	#[cfg(feature = "client")]
-	#[error("invalid authorization header: {0}")]
-	InvalidAuthorizationHeader(
+	#[error("service token request failed: {0}")]
+	TokenRequest(
 		#[from]
 		#[serde(skip_serializing)]
-		reqwest::header::InvalidHeaderValue,
+		TokenError,
+	),
+	/// OIDC discovery or JWKS retrieval failed.
+	#[cfg(any(feature = "client", feature = "jwks"))]
+	#[error("OIDC discovery failed: {0}")]
+	OidcDiscovery(
+		#[from]
+		#[serde(skip_serializing)]
+		DiscoveryError,
 	),
 	/// The HTTP client could not be initialized or a request failed.
 	#[cfg(any(feature = "client", feature = "jwks"))]
@@ -138,15 +149,16 @@ impl Error {
 			Self::HttpClient(_) | Self::HttpStatus(_) => {
 				StatusCode::SERVICE_UNAVAILABLE
 			},
-			Self::AdapterNotInitialized
-			| Self::AdapterAlreadyInitialized
-			| Self::InvalidConfiguration(_) => {
+			#[cfg(feature = "client")]
+			Self::TokenRequest(_) => StatusCode::SERVICE_UNAVAILABLE,
+			#[cfg(any(feature = "client", feature = "jwks"))]
+			Self::OidcDiscovery(_) => StatusCode::SERVICE_UNAVAILABLE,
+			Self::InvalidConfiguration(_) => {
 				StatusCode::INTERNAL_SERVER_ERROR
 			},
 			Self::InvalidRequestUrl(_) => StatusCode::INTERNAL_SERVER_ERROR,
 			#[cfg(feature = "client")]
-			Self::UnsupportedTokenType(_)
-			| Self::InvalidAuthorizationHeader(_) => {
+			Self::UnsupportedTokenType(_) => {
 				StatusCode::INTERNAL_SERVER_ERROR
 			},
 		}

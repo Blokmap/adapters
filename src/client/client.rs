@@ -3,10 +3,16 @@
 #[cfg(feature = "client")]
 use std::sync::Arc;
 
+use openidconnect::core::CoreProviderMetadata;
+use openidconnect::{
+	AsyncHttpClient,
+	DiscoveryError,
+	HttpClientError,
+	HttpRequest,
+	IssuerUrl,
+};
 #[cfg(feature = "client")]
 use reqwest::StatusCode;
-#[cfg(feature = "client")]
-use reqwest::header::AUTHORIZATION;
 use reqwest::{Client, Method, RequestBuilder, Response};
 use serde::Serialize;
 use url::Url;
@@ -22,7 +28,7 @@ use crate::{Error, Result};
 #[allow(async_fn_in_trait)]
 /// Dispatches requests for the supported authentication states.
 pub(super) trait HttpRequestHandler {
-	/// Sends optional JSON `data` to `/{endpoint}` and checks its HTTP status.
+	/// Sends optional JSON `data` to the endpoint URL and checks its status.
 	///
 	/// # Errors
 	///
@@ -67,10 +73,11 @@ impl HttpRequestHandler for HttpUnauthenticated {
 	}
 }
 
-/// State of an [`HttpClient`] created with [`HttpClient::authenticated`].
-/// It owns a shared service-token cache. Cloning the client shares that cache
-/// and its refresh coordination. Obtain this state through the factory;
-/// consumers do not construct or manage tokens themselves.
+/// State of an [`HttpClient`] created with
+/// [`crate::BlokmapAuthAdapter::client`]. It owns a shared service-token cache.
+/// Cloning the client shares that cache and its refresh coordination. Obtain
+/// this state through the factory; consumers do not construct or manage tokens
+/// themselves.
 #[derive(Clone)]
 #[cfg(feature = "client")]
 pub struct HttpAuthenticated {
@@ -94,7 +101,7 @@ impl HttpRequestHandler for HttpAuthenticated {
 
 		let mut response = client
 			.build_request(endpoint, data, method.clone())?
-			.header(AUTHORIZATION, token.value.clone())
+			.bearer_auth(&token.value)
 			.send()
 			.await?;
 
@@ -103,7 +110,7 @@ impl HttpRequestHandler for HttpAuthenticated {
 
 			response = client
 				.build_request(endpoint, data, method)?
-				.header(AUTHORIZATION, token.value.clone())
+				.bearer_auth(&token.value)
 				.send()
 				.await?;
 
@@ -122,18 +129,19 @@ impl HttpRequestHandler for HttpAuthenticated {
 
 /// Outgoing JSON requests with optional managed service authentication.
 ///
-/// Use [`Self::new`] for unauthenticated requests, or [`Self::authenticated`]
-/// after library initialization to send service credentials. Clones share the
-/// connection pool and, for authenticated clients, the token cache.
+/// Use [`Self::new`] for unauthenticated requests, or
+/// `adapter.client(base, scopes)` with `client` enabled to send service
+/// credentials. Clones share the connection pool and, for authenticated
+/// clients, the token cache.
 ///
 /// Endpoints resolve at the base URL's origin: `items/1` and `/items/1` both
 /// target `/items/1`, even if the base URL contains a path. Methods return the
 /// successful `reqwest::Response`; read its body with `.json()`, `.text()`, or
 /// `.bytes()`. Non-success statuses become [`Error::HttpStatus`].
 ///
-/// Authenticated requests fetch a token lazily, then retry once after a 401
-/// with a refreshed token. POST and PUT serialize their JSON payload again
-/// for that retry. Other failures are not retried.
+/// Authenticated requests fetch a token lazily, refresh it when `expires_in`
+/// elapses, and retry once after a 401. POST and PUT serialize their payload
+/// again for that retry. Other failures are not retried.
 ///
 /// ```no_run
 /// # #[cfg(feature = "client")]
@@ -169,38 +177,49 @@ impl HttpClient<HttpUnauthenticated> {
 		Self { client, base, state: HttpUnauthenticated }
 	}
 
-	/// Creates a client using the initialized service credentials and `scopes`.
-	/// Each new client has its own token cache; clone it to share that cache.
-	/// Construction makes no HTTP requests. The first request obtains a token
-	/// from `/auth/service`; a 401 refreshes it and retries once.
-	///
-	/// ```no_run
-	/// use blokmap_auth::authorization::TokenScope;
-	/// use blokmap_auth::client::HttpClient;
-	/// # fn example() -> blokmap_auth::Result<()> {
-	/// let images = HttpClient::authenticated(
-	/// 	"https://images.example.com".parse()?,
-	/// 	&[TokenScope::ImagesUpload],
-	/// )?;
-	/// # let _ = images;
-	/// # Ok(())
-	/// # }
-	/// ```
-	///
-	/// # Errors
-	///
-	/// Returns [`Error::AdapterNotInitialized`] before [`crate::initialize`].
-	///
-	/// # Panics
-	///
-	/// Panics if TLS or system resolver initialization fails.
-	#[cfg(feature = "client")]
-	pub fn authenticated(
-		base: Url,
-		scopes: &[TokenScope],
-	) -> Result<HttpClient<HttpAuthenticated>> {
-		let config = BlokmapAdapterConfig::global()?;
-		HttpClient::<HttpAuthenticated>::from_config(base, scopes, config)
+	pub(crate) fn for_oidc(base: Url) -> Result<Self> {
+		let client = Client::builder()
+			.redirect(reqwest::redirect::Policy::none())
+			.build()?;
+
+		Ok(Self { client, base, state: HttpUnauthenticated })
+	}
+
+	pub(crate) async fn get_url(&self, url: &Url) -> Result<Response> {
+		HttpUnauthenticated::request::<()>(
+			self,
+			url.as_str(),
+			None,
+			Method::GET,
+		)
+		.await
+	}
+
+	pub(crate) async fn discover(
+		&self,
+		issuer: &IssuerUrl,
+	) -> Result<CoreProviderMetadata> {
+		let url = issuer.join(".well-known/openid-configuration")?;
+		let metadata: CoreProviderMetadata =
+			self.get_url(&url).await?.json().await?;
+
+		if metadata.issuer() != issuer {
+			return Err(DiscoveryError::Validation(
+				"discovery issuer does not match the configured issuer".into(),
+			)
+			.into());
+		}
+
+		Ok(metadata)
+	}
+}
+
+impl<'c> AsyncHttpClient<'c> for HttpClient<HttpUnauthenticated> {
+	type Error = HttpClientError<reqwest::Error>;
+	type Future = <Client as AsyncHttpClient<'c>>::Future;
+
+	fn call(&'c self, request: HttpRequest) -> Self::Future {
+		self.client.call(request)
 	}
 }
 
@@ -209,13 +228,13 @@ impl HttpClient<HttpAuthenticated> {
 	pub(crate) fn from_config(
 		base: Url,
 		scopes: &[TokenScope],
-		config: &BlokmapAdapterConfig,
+		config: Arc<BlokmapAdapterConfig>,
 	) -> Result<Self> {
+		config.validate_client()?;
+
 		let client = Client::new();
-		let tokens = Arc::new(AccessTokenManager::new(
-			config.auth_api_url()?.clone(),
-			scopes,
-		));
+		let tokens = Arc::new(AccessTokenManager::new(config, scopes)?);
+
 		Ok(Self { client, base, state: HttpAuthenticated { tokens } })
 	}
 }
@@ -223,7 +242,7 @@ impl HttpClient<HttpAuthenticated> {
 // State dispatch is internal; consumers use the two provided states.
 #[allow(private_bounds)]
 impl<State: HttpRequestHandler> HttpClient<State> {
-	/// Builds a request to `/{endpoint}` with optional JSON data.
+	/// Builds a request to an absolute URL with optional JSON data.
 	///
 	/// # Errors
 	///
@@ -235,9 +254,7 @@ impl<State: HttpRequestHandler> HttpClient<State> {
 		data: Option<&D>,
 		method: Method,
 	) -> Result<RequestBuilder> {
-		let url = self
-			.base
-			.join(&format!("/{}", endpoint.trim_start_matches('/')))?;
+		let url = Url::parse(endpoint)?;
 		let mut request = self.client.request(method, url);
 
 		if let Some(body) = data {
@@ -261,7 +278,11 @@ impl<State: HttpRequestHandler> HttpClient<State> {
 	where
 		D: Serialize,
 	{
-		State::request(self, endpoint, data, method).await
+		let url = self
+			.base
+			.join(&format!("/{}", endpoint.trim_start_matches('/')))?;
+
+		State::request(self, url.as_str(), data, method).await
 	}
 
 	/// Sends GET to an origin-relative endpoint and returns its success
