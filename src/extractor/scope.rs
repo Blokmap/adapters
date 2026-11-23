@@ -44,8 +44,8 @@ pub trait RequiredScope: Send + Sync {
 /// use blokmap_auth::extractor::{ProfileSession, Scope};
 ///
 /// async fn upload(
-/// 	_: Scope<ImagesUpload>,
-/// 	session: ProfileSession,
+///    _: Scope<ImagesUpload>,
+///    session: ProfileSession,
 /// ) -> Json<ProfileSession> {
 /// 	Json(session)
 /// }
