@@ -38,7 +38,7 @@ use crate::{Error, Result};
 /// 	Router::new().route("/images", post(upload));
 /// ```
 #[derive(Clone, Copy, Debug)]
-pub struct Scope<const REQUIRED: TokenScope>(());
+pub struct Scope<const REQUIRED: TokenScope>;
 
 impl<S, const REQUIRED: TokenScope> FromRequestParts<S> for Scope<REQUIRED>
 where
@@ -54,6 +54,6 @@ where
 			return Err(Error::MissingScope(REQUIRED));
 		}
 
-		Ok(Self(()))
+		Ok(Self)
 	}
 }
