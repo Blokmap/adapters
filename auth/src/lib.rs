@@ -128,12 +128,13 @@
 #![warn(missing_docs)]
 
 mod adapter;
+mod error;
+
 pub mod authentication;
 pub mod authorization;
 #[cfg(any(feature = "client", feature = "jwks"))]
 pub mod client;
 pub mod config;
-mod error;
 pub mod extractor;
 
 pub use adapter::BlokmapAuthAdapter;

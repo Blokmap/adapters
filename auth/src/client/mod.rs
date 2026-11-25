@@ -1,9 +1,9 @@
 //! HTTP clients with either no authentication or managed service credentials.
 
-mod client;
+mod http_client;
 #[cfg(feature = "client")]
 mod token;
 
 #[cfg(feature = "client")]
-pub use client::HttpAuthenticated;
-pub use client::{HttpClient, HttpUnauthenticated};
+pub use http_client::HttpAuthenticated;
+pub use http_client::{HttpClient, HttpUnauthenticated};

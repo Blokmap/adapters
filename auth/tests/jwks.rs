@@ -50,6 +50,7 @@ fn jwk(kid: &str, pem: &[u8]) -> Jwk {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn jwks_is_lazy_shared_and_refreshed_after_ten_minutes() {
 	let first = jwk("first", include_bytes!("keys/ed25519-public.pem"));
 	let second = jwk("second", include_bytes!("keys/ed25519-other-public.pem"));

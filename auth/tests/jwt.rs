@@ -1,5 +1,5 @@
 use blokmap_auth::authentication::{DecodingKey, EncodingKey, JwtToken};
-use blokmap_auth::authorization::TokenScope;
+use blokmap_auth::authorization::{TokenRole, TokenScope};
 use blokmap_auth::{Error, Result};
 use jsonwebtoken::errors::ErrorKind;
 use jsonwebtoken::{
@@ -36,12 +36,12 @@ fn claims() -> JwtToken {
 	}
 }
 
-fn rejected(result: Result<JwtToken>, expected: ErrorKind) {
+fn rejected(result: Result<JwtToken>, expected: &ErrorKind) {
 	let Error::Jwt(error) = result.unwrap_err() else {
 		panic!("expected a JWT validation error");
 	};
 
-	assert_eq!(error.kind(), &expected);
+	assert_eq!(error.kind(), expected);
 }
 
 #[test]
@@ -82,7 +82,7 @@ fn standard_scope_and_audience_claims_are_supported() {
 
 	assert_eq!(token.aud, ["core"]);
 	assert_eq!(token.scopes, [TokenScope::ImagesUpload, TokenScope::AuthCheck]);
-	assert!(token.roles.is_empty());
+	assert_eq!(token.roles, [] as [TokenRole; 0]);
 
 	payload["scope"] = "images:upload unknown:read".into();
 	assert!(serde_json::from_value::<JwtToken>(payload.clone()).is_err());
@@ -90,7 +90,7 @@ fn standard_scope_and_audience_claims_are_supported() {
 	payload.as_object_mut().unwrap().remove("scope");
 	let token: JwtToken = serde_json::from_value(payload).unwrap();
 
-	assert!(token.scopes.is_empty());
+	assert_eq!(token.scopes, [] as [TokenScope; 0]);
 }
 
 #[test]
@@ -102,11 +102,11 @@ fn verification_rejects_bad_signatures_claims_and_algorithms() {
 
 	rejected(
 		JwtToken::verify(&token, &public_key, "https://other.example", "core"),
-		ErrorKind::InvalidIssuer,
+		&ErrorKind::InvalidIssuer,
 	);
 	rejected(
 		JwtToken::verify(&token, &public_key, ISSUER, "other"),
-		ErrorKind::InvalidAudience,
+		&ErrorKind::InvalidAudience,
 	);
 
 	let other_key = DecodingKey::from_ed_pem(include_bytes!(
@@ -116,7 +116,7 @@ fn verification_rejects_bad_signatures_claims_and_algorithms() {
 
 	rejected(
 		JwtToken::verify(&token, &other_key, ISSUER, "core"),
-		ErrorKind::InvalidSignature,
+		&ErrorKind::InvalidSignature,
 	);
 
 	let (prefix, signature) = token.rsplit_once('.').unwrap();
@@ -124,7 +124,7 @@ fn verification_rejects_bad_signatures_claims_and_algorithms() {
 	let tampered = format!("{prefix}.{first}{}", &signature[1..]);
 	rejected(
 		JwtToken::verify(&tampered, &public_key, ISSUER, "core"),
-		ErrorKind::InvalidSignature,
+		&ErrorKind::InvalidSignature,
 	);
 
 	let mut expired = claims.clone();
@@ -133,7 +133,7 @@ fn verification_rejects_bad_signatures_claims_and_algorithms() {
 
 	rejected(
 		JwtToken::verify(&expired, &public_key, ISSUER, "core"),
-		ErrorKind::ExpiredSignature,
+		&ErrorKind::ExpiredSignature,
 	);
 
 	let mut within_leeway = claims.clone();
@@ -149,7 +149,7 @@ fn verification_rejects_bad_signatures_claims_and_algorithms() {
 
 	rejected(
 		JwtToken::verify(&hmac, &public_key, ISSUER, "core"),
-		ErrorKind::InvalidAlgorithm,
+		&ErrorKind::InvalidAlgorithm,
 	);
 
 	let mut future = serde_json::to_value(&claims).unwrap();

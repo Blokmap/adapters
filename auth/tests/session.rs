@@ -133,6 +133,7 @@ async fn request_credentials(
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn extracts_only_verified_bearer_and_cookie_subjects() {
 	let public_key =
 		DecodingKey::from_ed_pem(include_bytes!("keys/ed25519-public.pem"))
@@ -237,9 +238,10 @@ async fn extracts_only_verified_bearer_and_cookie_subjects() {
 			"/admin",
 			get(|session: JwtSession| {
 				async move {
-					match session.is_admin() {
-						true => StatusCode::OK,
-						false => StatusCode::FORBIDDEN,
+					if session.is_admin() {
+						StatusCode::OK
+					} else {
+						StatusCode::FORBIDDEN
 					}
 				}
 			}),

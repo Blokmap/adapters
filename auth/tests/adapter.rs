@@ -87,7 +87,7 @@ async fn adapters_verify_independently_and_scope_request_caches() {
 	assert!(second.verify(&token).await.is_err());
 	assert!(first.verify(&other_token).await.is_err());
 
-	let (mut parts, _) = Request::builder()
+	let (mut parts, ()) = Request::builder()
 		.header(
 			"cookie",
 			format!("session={token}; other_session={other_token}"),
