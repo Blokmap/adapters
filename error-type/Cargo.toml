@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 error-type-derive = { path = "../error-type-derive" }
 
+deadpool-diesel = "0.7.0"
+
 [dev-dependencies]
 thiserror = "2"
 trybuild = "1"
