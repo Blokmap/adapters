@@ -1,0 +1,5 @@
+error: on enums, put `error_type` attributes on the variants
+ --> tests/ui/enum_level_rename.rs:3:6
+  |
+3 | enum E {
+  |      ^

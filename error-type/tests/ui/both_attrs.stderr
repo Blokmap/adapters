@@ -1,0 +1,5 @@
+error: duplicate `error_type` attribute
+ --> tests/ui/both_attrs.rs:4:5
+  |
+4 |     #[error_type(transparent)]
+  |     ^

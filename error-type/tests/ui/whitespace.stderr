@@ -1,0 +1,5 @@
+error: error type must be non-empty and contain no whitespace
+ --> tests/ui/whitespace.rs:3:20
+  |
+3 |     #[error_type = "task panicked"]
+  |                    ^^^^^^^^^^^^^^^

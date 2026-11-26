@@ -1,0 +1,5 @@
+error: `#[error_type(transparent)]` requires exactly one field
+ --> tests/ui/transparent_two_fields.rs:3:5
+  |
+3 |     #[error_type(transparent)]
+  |     ^

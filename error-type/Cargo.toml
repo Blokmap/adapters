@@ -1,0 +1,11 @@
+[package]
+name = "error-type"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+error-type-derive = { path = "../error-type-derive" }
+
+[dev-dependencies]
+thiserror = "2"
+trybuild = "1"

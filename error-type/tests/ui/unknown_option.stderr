@@ -1,0 +1,5 @@
+error: unknown option, expected `transparent`
+ --> tests/ui/unknown_option.rs:3:18
+  |
+3 |     #[error_type(skip)]
+  |                  ^^^^

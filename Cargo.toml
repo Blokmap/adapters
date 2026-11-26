@@ -1,3 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["auth", "otel"]
+members = ["auth", "otel", "error-type", "error-type-derive"]
