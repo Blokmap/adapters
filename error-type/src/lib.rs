@@ -16,6 +16,7 @@ impl<E: ErrorType + ?Sized> ErrorType for Box<E> {
 	fn error_type(&self) -> &'static str { (**self).error_type() }
 }
 
+#[cfg(feature = "deadpool-diesel")]
 impl ErrorType for deadpool_diesel::PoolError {
 	fn error_type(&self) -> &'static str {
 		match self {

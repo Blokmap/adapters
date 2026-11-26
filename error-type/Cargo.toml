@@ -3,10 +3,14 @@ name = "error-type"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+default = []
+deadpool-diesel = ["dep:deadpool-diesel"]
+
 [dependencies]
 error-type-derive = { path = "../error-type-derive" }
 
-deadpool-diesel = "0.7.0"
+deadpool-diesel = { version = "0.7.0", optional = true }
 
 [dev-dependencies]
 thiserror = "2"
