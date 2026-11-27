@@ -12,6 +12,8 @@ use opentelemetry_semantic_conventions::trace::{
 	HTTP_REQUEST_METHOD,
 	HTTP_RESPONSE_STATUS_CODE,
 	HTTP_ROUTE,
+	NETWORK_PROTOCOL_NAME,
+	NETWORK_PROTOCOL_VERSION,
 	SERVER_ADDRESS,
 	SERVER_PORT,
 	URL_PATH,
@@ -19,6 +21,7 @@ use opentelemetry_semantic_conventions::trace::{
 	URL_SCHEME,
 	USER_AGENT_ORIGINAL,
 };
+use reqwest::Version;
 use reqwest::header::{HOST, USER_AGENT};
 use tracing::field::Empty;
 use tracing::{Level, Span};
@@ -38,6 +41,7 @@ pub struct OtelHttpAttributes<S: HttpServerSpanState> {
 	http_request_method: String,
 	url_path:            String,
 	url_scheme:          Cow<'static, str>,
+	http_version:        String,
 
 	error_type:                Option<String>,
 	http_response_status_code: Option<u16>,
@@ -106,6 +110,15 @@ impl<B: Body> From<&Request<B>> for OtelHttpAttributes<PreResponse> {
 			.and_then(|v| v.to_str().ok())
 			.map(ToOwned::to_owned);
 
+		let http_version = match request.version() {
+			Version::HTTP_09 => String::from("0.9"),
+			Version::HTTP_10 => String::from("1.0"),
+			Version::HTTP_11 => String::from("1.1"),
+			Version::HTTP_2 => String::from("2.0"),
+			Version::HTTP_3 => String::from("3.0"),
+			_ => String::from(""),
+		};
+
 		Self {
 			http_request_method,
 			url_path,
@@ -120,6 +133,7 @@ impl<B: Body> From<&Request<B>> for OtelHttpAttributes<PreResponse> {
 			client_address,
 			server_address,
 			user_agent_original,
+			http_version,
 
 			_state: PhantomData,
 		}
@@ -132,17 +146,19 @@ impl From<&OtelHttpAttributes<PreResponse>> for Span {
 			format!("{} {}", attrs.http_request_method, attrs.http_route);
 
 		let span = tracing::span!(
-			target: "routes",
+			target: "blokmap::http",
 			Level::INFO,
-			"request",
+			"http.request",
 			otel.name = %otel_name,
 			otel.kind = "server",
 			{HTTP_REQUEST_METHOD} = %attrs.http_request_method,
-			{URL_PATH} = %attrs.url_path,
-			{URL_SCHEME} = %attrs.url_scheme,
-			{ERROR_TYPE} = Empty,
-			{HTTP_RESPONSE_STATUS_CODE} = Empty,
 			{HTTP_ROUTE} = %attrs.http_route,
+			{HTTP_RESPONSE_STATUS_CODE} = Empty,
+			{URL_SCHEME} = %attrs.url_scheme,
+			{URL_PATH} = %attrs.url_path,
+			{NETWORK_PROTOCOL_NAME} = "http",
+			{NETWORK_PROTOCOL_VERSION} = %attrs.http_version,
+			{ERROR_TYPE} = Empty,
 			{SERVER_PORT} = Empty,
 			{URL_QUERY} = Empty,
 			{CLIENT_ADDRESS} = Empty,
@@ -225,6 +241,7 @@ impl OtelHttpAttributes<PreResponse> {
 			client_address:      self.client_address,
 			server_address:      self.server_address,
 			user_agent_original: self.user_agent_original,
+			http_version:        self.http_version,
 
 			_state: PhantomData,
 		}
