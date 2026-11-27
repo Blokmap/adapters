@@ -815,7 +815,11 @@ version = "0.1.0"
 dependencies = [
  "deadpool-diesel",
  "error-type-derive",
+ "opentelemetry",
+ "opentelemetry-semantic-conventions",
  "thiserror 2.0.21",
+ "tracing",
+ "tracing-opentelemetry",
  "trybuild",
 ]
 
