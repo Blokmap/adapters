@@ -116,7 +116,7 @@ impl<B: Body> From<&Request<B>> for OtelHttpAttributes<PreResponse> {
 			Version::HTTP_11 => String::from("1.1"),
 			Version::HTTP_2 => String::from("2.0"),
 			Version::HTTP_3 => String::from("3.0"),
-			_ => String::from(""),
+			_ => String::new(),
 		};
 
 		Self {

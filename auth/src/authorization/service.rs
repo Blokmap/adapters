@@ -29,18 +29,12 @@ const REQUIRED_SCOPES: &[TokenScope] = &[
 /// happens in the auth service. Untagged JSON is either an `any` object, an
 /// `all` object, or a flat `{scope, id, permission}` object.
 #[derive(Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 pub enum AuthorizationRequirements {
 	/// Requires at least one nested rule to pass.
-	Any {
-		/// Alternative rules, including nested combinations.
-		any: Vec<Self>,
-	},
+	Any(Vec<Self>),
 	/// Requires all nested rules to pass.
-	All {
-		/// Rules that must all be satisfied.
-		all: Vec<Self>,
-	},
+	All(Vec<Self>),
 	/// Checks permission bits for one resource.
 	Permission {
 		/// Kind of resource whose permissions are being checked.

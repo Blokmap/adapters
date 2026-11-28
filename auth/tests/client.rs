@@ -79,7 +79,7 @@ fn request() -> AuthorizationCheck {
 	AuthorizationCheck {
 		subject:      Uuid::nil(),
 		principal:    AuthorizationPrincipal::Service,
-		requirements: AuthorizationRequirements::All { all: Vec::new() },
+		requirements: AuthorizationRequirements::All(Vec::new()),
 	}
 }
 

@@ -16,6 +16,7 @@ pub trait ErrorType {
 
 /// Helper trait to set otel `error.type` values on the current span
 pub trait RecordError {
+	#[must_use]
 	fn record_err(self) -> Self;
 }
 

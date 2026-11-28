@@ -54,7 +54,7 @@ fn main() -> Result<()> {
 	let _check = AuthorizationCheck {
 		subject:      session.sub,
 		principal:    session.principal,
-		requirements: AuthorizationRequirements::All { all: Vec::new() },
+		requirements: AuthorizationRequirements::All(Vec::new()),
 	};
 
 	// Create the adapter

@@ -37,7 +37,7 @@ async fn main() -> Result<()> {
 	let check = AuthorizationCheck {
 		subject:      Uuid::nil(),
 		principal:    AuthorizationPrincipal::Profile,
-		requirements: AuthorizationRequirements::All { all: Vec::new() },
+		requirements: AuthorizationRequirements::All(Vec::new()),
 	};
 
 	adapter.authorization()?.check(check).await?;
