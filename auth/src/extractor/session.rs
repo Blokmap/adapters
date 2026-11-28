@@ -133,6 +133,29 @@ impl Deref for ProfileSession {
 	fn deref(&self) -> &Self::Target { &self.0 }
 }
 
+/// Axum extractor requiring a verified `profile:<uuid>` JWT with the
+/// [admin role](TokenRole::Admin)
+///
+/// Accepts a Bearer header or the configured cookie, following [`JwtSession`]'s
+/// credential precedence.
+///
+/// Supply the adapter through application state, as for [`JwtSession`].
+/// Verification checks the signature, issuer, audience,
+/// and expiration using the configured local key or JWKS cache. Invalid tokens
+/// reject with 401; another valid principal rejects with 403.
+///
+/// Dereferences to [`JwtSession`] for `sub`, `principal`, and `scopes`, and
+/// serializes to the same JSON shape. Convert into `JwtSession` with `.into()`.
+/// `ProfileSession::try_from(session)` checks the principal only; use it with
+/// a session whose token has already been verified.
+///
+/// ```no_run
+/// use axum::Json;
+/// use blokmap_auth::extractor::ProfileSession;
+/// async fn current_profile(session: ProfileSession) -> Json<ProfileSession> {
+/// 	Json(session)
+/// }
+/// ```
 #[derive(Clone, Debug, Serialize)]
 pub struct AdminSession(JwtSession);
 
