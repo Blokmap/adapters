@@ -133,6 +133,15 @@ impl Deref for ProfileSession {
 	fn deref(&self) -> &Self::Target { &self.0 }
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct AdminSession(JwtSession);
+
+impl Deref for AdminSession {
+	type Target = JwtSession;
+
+	fn deref(&self) -> &Self::Target { &self.0 }
+}
+
 /// Axum extractor requiring a verified `device:<uuid>` JWT.
 ///
 /// Accepts a Bearer header or the configured cookie, following [`JwtSession`]'s
@@ -177,6 +186,26 @@ impl TryFrom<JwtSession> for ProfileSession {
 
 impl From<ProfileSession> for JwtSession {
 	fn from(session: ProfileSession) -> Self { session.0 }
+}
+
+impl TryFrom<JwtSession> for AdminSession {
+	type Error = Error;
+
+	fn try_from(session: JwtSession) -> Result<Self> {
+		if session.principal != AuthorizationPrincipal::Profile {
+			return Err(Error::UnexpectedPrincipal);
+		}
+
+		if !session.roles.contains(&TokenRole::Admin) {
+			return Err(Error::MissingRole(TokenRole::Admin));
+		}
+
+		Ok(Self(session))
+	}
+}
+
+impl From<AdminSession> for JwtSession {
+	fn from(session: AdminSession) -> Self { session.0 }
 }
 
 impl TryFrom<JwtSession> for DeviceSession {
@@ -240,6 +269,19 @@ where
 }
 
 impl<S> FromRequestParts<S> for ProfileSession
+where
+	S: Send + Sync,
+	Arc<BlokmapAuthAdapter>: FromRef<S>,
+{
+	type Rejection = Error;
+
+	async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self> {
+		let session = JwtSession::from_request_parts(parts, state).await?;
+		Self::try_from(session)
+	}
+}
+
+impl<S> FromRequestParts<S> for AdminSession
 where
 	S: Send + Sync,
 	Arc<BlokmapAuthAdapter>: FromRef<S>,

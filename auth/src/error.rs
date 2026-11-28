@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
 
-use crate::authorization::TokenScope;
+use crate::authorization::{TokenRole, TokenScope};
 
 #[cfg(any(feature = "client", feature = "jwks"))]
 type OidcHttpError = openidconnect::HttpClientError<reqwest::Error>;
@@ -70,6 +70,9 @@ pub enum Error {
 	/// A valid session does not contain the required scope.
 	#[error("missing required scope: {0}")]
 	MissingScope(TokenScope),
+	/// A valid session does not contain  the required role
+	#[error("missing required role: {0}")]
+	MissingRole(TokenRole),
 	/// The token endpoint returned a token type other than Bearer.
 	#[cfg(feature = "client")]
 	#[error("unsupported token type: {0}")]
@@ -140,27 +143,22 @@ impl Error {
 			Self::MissingAccessToken | Self::MalformedAuthorizationHeader => {
 				StatusCode::UNAUTHORIZED
 			},
-			Self::UnexpectedPrincipal | Self::MissingScope(_) => {
-				StatusCode::FORBIDDEN
-			},
+			Self::UnexpectedPrincipal
+			| Self::MissingScope(_)
+			| Self::MissingRole(_) => StatusCode::FORBIDDEN,
 			#[cfg(feature = "client")]
 			Self::Unauthenticated => StatusCode::UNAUTHORIZED,
 			#[cfg(any(feature = "client", feature = "jwks"))]
-			Self::HttpClient(_) | Self::HttpStatus(_) => {
-				StatusCode::SERVICE_UNAVAILABLE
-			},
+			Self::HttpClient(_)
+			| Self::HttpStatus(_) => StatusCode::SERVICE_UNAVAILABLE,
 			#[cfg(feature = "client")]
 			Self::TokenRequest(_) => StatusCode::SERVICE_UNAVAILABLE,
 			#[cfg(any(feature = "client", feature = "jwks"))]
 			Self::OidcDiscovery(_) => StatusCode::SERVICE_UNAVAILABLE,
-			Self::InvalidConfiguration(_) => {
-				StatusCode::INTERNAL_SERVER_ERROR
-			},
+			Self::InvalidConfiguration(_) => StatusCode::INTERNAL_SERVER_ERROR,
 			Self::InvalidRequestUrl(_) => StatusCode::INTERNAL_SERVER_ERROR,
 			#[cfg(feature = "client")]
-			Self::UnsupportedTokenType(_) => {
-				StatusCode::INTERNAL_SERVER_ERROR
-			},
+			Self::UnsupportedTokenType(_) => StatusCode::INTERNAL_SERVER_ERROR,
 		}
 	}
 }
